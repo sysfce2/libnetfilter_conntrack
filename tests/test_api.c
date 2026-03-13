@@ -18,18 +18,29 @@
  * this file contains a test to check the set/get/copy/cmp APIs.
  */
 
-static void eval_sigterm(int status)
+static int eval_status(int status)
 {
+	if (WIFEXITED(status)) {
+		int rc =  WEXITSTATUS(status);
+
+		if (rc == 0)
+			printf("OK\n");
+		else
+			printf("FAIL\n");
+
+		return rc;
+	}
+
 	switch(WTERMSIG(status)) {
 	case SIGSEGV:
 		printf("received SIGSEV\n");
-		break;
-	case 0:
-		printf("OK\n");
-		break;
+		return 1;
+	case SIGABRT:
+		printf("received SIGABRT\n");
+		return 2;
 	default:
 		printf("exited with signal: %d\n", WTERMSIG(status));
-		break;
+		return 1;
 	}
 }
 
@@ -155,6 +166,7 @@ static int attr_is_readonly(int attr)
 	case ATTR_SECCTX:
 	case ATTR_TIMESTAMP_START:
 	case ATTR_TIMESTAMP_STOP:
+	case ATTR_TIMESTAMP_EVENT:
 		return 1;
 	}
 	return 0;
@@ -166,7 +178,7 @@ static int test_nfct_cmp_api_single(struct nf_conntrack *ct1,
 {
 	char data[256];
 	struct nfct_bitmask *b;
-	int bit;
+	int bit, is_set;
 
 	if (attr_is_readonly(attr))
 		return 0;
@@ -220,6 +232,7 @@ static int test_nfct_cmp_api_single(struct nf_conntrack *ct1,
 	case ATTR_SYNPROXY_TSOFF:
 
 	case ATTR_HELPER_INFO:
+	case ATTR_TIMESTAMP_EVENT:
 		return 0; /* XXX */
 
 	default:
@@ -243,8 +256,14 @@ static int test_nfct_cmp_api_single(struct nf_conntrack *ct1,
 	nfct_copy(ct2, ct1, NFCT_CP_OVERRIDE);
 	memset(data, 42, sizeof(data));
 
-	assert(nfct_attr_is_set(ct1, attr));
-	assert(nfct_attr_is_set(ct2, attr));
+	is_set = nfct_attr_is_set(ct1, attr);
+	if (!is_set)
+		fprintf(stderr, "attr %d is %d\n", attr, is_set);
+	assert(is_set);
+	is_set = nfct_attr_is_set(ct2, attr);
+	if (!is_set)
+		fprintf(stderr, "attr %d is %d\n", attr, is_set);
+	assert(is_set);
 
 	switch (attr) {
 	case ATTR_CONNLABELS:
@@ -481,7 +500,7 @@ static void test_nfexp_cmp_api(struct nf_expect *ex1, struct nf_expect *ex2)
 
 int main(void)
 {
-	int ret, i;
+	int ret, i, rc = 0;
 	struct nf_conntrack *ct, *ct2, *tmp;
 	struct nf_expect *exp, *tmp_exp;
 	char data[256];
@@ -514,7 +533,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	b = nfct_bitmask_new(rand() & 0xffff);
@@ -544,7 +563,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	printf("== validate set API ==\n");
@@ -576,16 +595,20 @@ int main(void)
 				continue;
 			}
 
+			if (!val) {
+			}
+
 			if (val[0] != data[0]) {
 				printf("ERROR: set/get operations don't match "
 				       "for attribute %d (%x != %x)\n",
 					i, val[0], data[0]);
+				ret = 1;
 			}
 		}
-		exit(0);
+		exit(ret);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	printf("== test copy API ==\n");
@@ -596,7 +619,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	ret = fork();
@@ -605,7 +628,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	exp = nfexp_new();
@@ -627,7 +650,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	for (i=0; i<ATTR_EXP_MAX; i++)
@@ -641,7 +664,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	printf("== validate expect set API ==\n");
@@ -660,7 +683,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	ret = fork();
@@ -669,7 +692,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	ct2 = nfct_new();
@@ -686,7 +709,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	for (i=0; i<ATTR_GRP_MAX; i++)
@@ -702,7 +725,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	printf("== validate set grp API ==\n");
@@ -733,7 +756,7 @@ int main(void)
 		exit(0);
 	} else {
 		wait(&status);
-		eval_sigterm(status);
+		rc |= eval_status(status);
 	}
 
 	nfct_destroy(ct2);
@@ -743,9 +766,12 @@ int main(void)
 	nfexp_destroy(exp);
 	nfexp_destroy(tmp_exp);
 
-	printf("OK\n");
-
 	test_nfct_bitmask();
 
-	return EXIT_SUCCESS;
+	if (rc == 0)
+		printf("OK\n");
+	else
+		printf("FAIL: errors found, exiting with %d\n", rc);
+
+	return rc;
 }
